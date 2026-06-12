@@ -32,7 +32,7 @@ let usersCollection;
 
 async function connectDB() {
     try {
-        await client.connect();
+        // await client.connect();
         const db = client.db(process.env.DB_NAME || "petnest");
         petsCollection = db.collection("pets");
         requestsCollection = db.collection("requests");
