@@ -157,7 +157,12 @@ app.get("/api/pets", async (req, res) => {
         const query = {};
 
         if (search) {
-            query.name = { $regex: search, $options: "i" };
+            // Search both name AND species
+            query.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { species: { $regex: search, $options: "i" } },
+                { breed: { $regex: search, $options: "i" } }
+            ];
         }
 
         if (species && species !== "all") {
