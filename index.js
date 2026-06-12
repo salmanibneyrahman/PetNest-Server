@@ -414,7 +414,7 @@ app.patch("/api/pets/:id/increment-view", async (req, res) => {
     }
 });
 
-// ─── REQUESTS ROUTES ────────────────────────────────────────────────────────
+// ─── REQUESTS ROUTES ─────────────────────────────────────────────────────────
 
 app.post("/api/requests", verifyToken, async (req, res) => {
     try {
