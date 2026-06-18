@@ -29,6 +29,7 @@ const client = new MongoClient(uri);
 let petsCollection;
 let requestsCollection;
 let usersCollection;
+let wishlistsCollection;
 
 async function connectDB() {
     try {
@@ -36,7 +37,8 @@ async function connectDB() {
         const db = client.db(process.env.DB_NAME || "petnest");
         petsCollection = db.collection("pets");
         requestsCollection = db.collection("requests");
-        usersCollection = db.collection("users");
+        usersCollection = db.collection("user");
+        wishlistsCollection = db.collection("wishlists");
         console.log("Connected to MongoDB successfully");
     } catch (error) {
         console.error("MongoDB connection error:", error);
@@ -204,10 +206,7 @@ app.get("/api/pets/featured", async (req, res) => {
 app.get("/api/pets/owner/:email", verifyToken, async (req, res) => {
     try {
         const { email } = req.params;
-
-        const tokenEmail =
-            req.user.email || req.user.sub || req.user["user.email"];
-
+        const tokenEmail = req.user.email || req.user.sub || req.user["user.email"];
         if (tokenEmail !== email) {
             return res.status(403).json({ error: "Forbidden" });
         }
@@ -216,6 +215,18 @@ app.get("/api/pets/owner/:email", verifyToken, async (req, res) => {
             .find({ ownerEmail: email })
             .sort({ createdAt: -1 })
             .toArray();
+
+        for (let pet of pets) {
+
+            const pendingCount = await requestsCollection.countDocuments({
+                petId: pet._id.toString(),
+                status: "pending"
+            });
+
+
+            pet.pendingCount = pendingCount;
+        }
+
 
         res.status(200).json(pets);
     } catch (error) {
@@ -656,6 +667,122 @@ app.delete("/api/requests/:id", verifyToken, async (req, res) => {
         res.status(200).json({ message: "Request cancelled successfully" });
     } catch (error) {
         console.error("Delete request error:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+
+// ─── WISHLIST ROUTES ─────────────────────────────────────────────────────────
+
+// Get user's wishlist
+app.get("/api/wishlist/:email", verifyToken, async (req, res) => {
+    try {
+        const { email } = req.params;
+        const tokenEmail = req.user.email || req.user.sub || req.user["user.email"];
+
+        if (tokenEmail !== email) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+
+        const user = await usersCollection.findOne({ email });
+        const wishlist = user?.wishlist || [];
+
+        // Fetch full pet details for wishlist items
+        const petIds = wishlist.map(id => new ObjectId(id));
+        const pets = await petsCollection.find({ _id: { $in: petIds } }).toArray();
+
+        res.status(200).json(pets);
+    } catch (error) {
+        console.error("Get wishlist error:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// Add to wishlist
+app.post("/api/wishlist", verifyToken, async (req, res) => {
+    try {
+        const { petId, userEmail } = req.body;
+        const tokenEmail = req.user.email || req.user.sub || req.user["user.email"];
+
+        if (tokenEmail !== userEmail) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+
+        if (!ObjectId.isValid(petId)) {
+            return res.status(400).json({ error: "Invalid pet ID" });
+        }
+
+        // Check if pet exists
+        const pet = await petsCollection.findOne({ _id: new ObjectId(petId) });
+        if (!pet) {
+            return res.status(404).json({ error: "Pet not found" });
+        }
+
+        // Add to user's wishlist (avoid duplicates)
+        await usersCollection.updateOne(
+            { email: userEmail },
+            { $addToSet: { wishlist: petId } }
+        );
+
+        // Increment pet's saves count
+        await petsCollection.updateOne(
+            { _id: new ObjectId(petId) },
+            { $inc: { saves: 1 } }
+        );
+
+        res.status(200).json({ message: "Added to wishlist" });
+    } catch (error) {
+        console.error("Add to wishlist error:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// Remove from wishlist
+app.delete("/api/wishlist", verifyToken, async (req, res) => {
+    try {
+        const { petId, userEmail } = req.body;
+        const tokenEmail = req.user.email || req.user.sub || req.user["user.email"];
+
+        if (tokenEmail !== userEmail) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+
+        await usersCollection.updateOne(
+            { email: userEmail },
+            { $pull: { wishlist: petId } }
+        );
+
+        // Decrement pet's saves count
+        if (ObjectId.isValid(petId)) {
+            await petsCollection.updateOne(
+                { _id: new ObjectId(petId) },
+                { $inc: { saves: -1 } }
+            );
+        }
+
+        res.status(200).json({ message: "Removed from wishlist" });
+    } catch (error) {
+        console.error("Remove from wishlist error:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// Check if pet is in wishlist
+app.get("/api/wishlist/check/:email/:petId", verifyToken, async (req, res) => {
+    try {
+        const { email, petId } = req.params;
+        const tokenEmail = req.user.email || req.user.sub || req.user["user.email"];
+
+        if (tokenEmail !== email) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+
+        const user = await usersCollection.findOne({ email });
+        const isInWishlist = user?.wishlist?.includes(petId) || false;
+
+        res.status(200).json({ isInWishlist });
+    } catch (error) {
+        console.error("Check wishlist error:", error);
         res.status(500).json({ error: "Internal server error" });
     }
 });
